@@ -1,5 +1,6 @@
 #include "feature/data_processor.h"
 #include "utils/config_profile.h"
+#include <stdlib.h>
 #include <iostream>
 #include <cstdlib>
 
@@ -68,6 +69,33 @@ adapter::SerializationResult run_default_processing() {
     }
 
     return result;
+}
+
+void process_data_raw(utils::ConfigType config_type,
+                       const char* data, size_t len,
+                       adapter::SerializationResult& result) {
+    // 高性能模式：调用方已保证数据合法性，直接走适配器
+    utils::ConfigProfile profile;
+    utils::create_config_profile(config_type, profile);
+    std::cout << "  Raw processing: config=" << profile.name
+              << ", timeout=" << profile.timeout_ms
+              << ", retry=" << profile.retry_limit << "\n";
+    adapter::serialize_data(config_type, data, len, 1, result);
+}
+
+void run_special_develop_config_processing(const char* data, size_t len, 
+                                            utils::ConfigType config_type) {
+    // 使用自定义配置处理数据，直接走高性能路径
+    adapter::SerializationResult result;
+    if (data == nullptr && config_type==utils::ConfigType::DEVELOPMENT) {
+       process_data_raw(config_type, data, len, result);
+    } else {
+        process_data_raw(utils::ConfigType::CUSTOM, data, len+1, result);
+    }
+}
+
+void run_custom_config_processing(const char* data) {
+    process_data(utils::ConfigType::CUSTOM, nullptr, 10);
 }
 
 } // namespace feature

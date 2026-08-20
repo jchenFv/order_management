@@ -1,15 +1,13 @@
 #include "adapter/data_adapter.h"
 #include "utils/config_profile.h"
 #include "utils/buffer_utils.h"
-#include <cstdlib>
-
+#include <stdlib.h>
 namespace oms {
 namespace adapter {
 
 void serialize_data(utils::ConfigType config_type,
-                    const char* data, size_t len,
-                    int format_type,
-                    SerializationResult& result) {
+                                    const char* data, size_t len,
+                                    int format_type, SerializationResult& result) {
     result = {};
 
     // 根据配置类型获取序列化参数
@@ -18,9 +16,6 @@ void serialize_data(utils::ConfigType config_type,
 
     // 分配序列化缓冲区，使用配置的超时参数计算缓冲区大小
     size_t buffer_size = len + 256;
-    if (profile.timeout_ms > 0) {
-        buffer_size = len + profile.timeout_ms;
-    }
 
     char* buffer = utils::allocate_buffer(buffer_size);
     if (buffer == nullptr) {

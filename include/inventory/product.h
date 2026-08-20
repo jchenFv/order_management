@@ -201,9 +201,17 @@ public:
     Result import_from_csv(const std::string& file_path);
     Result export_to_csv(const std::string& file_path) const;
 
+    ResultT<std::map<WarehouseId, int>> get_product_stock_distribution(ProductId product_id);
+    ResultT<int> get_product_total_stock(ProductId product_id);
+
+    Result batch_update_prices(const std::vector<ProductId>& ids, double percentage);
+    Result batch_update_stock(const std::map<ProductId, int>& stock_changes);
+
 private:
     ProductCatalog();
     ~ProductCatalog();
+
+    void update_indexes(Product* product, const std::string& old_category, const std::string& old_brand);
 
     std::map<ProductId, std::unique_ptr<Product>> products_;
     std::map<std::string, ProductId> sku_index_;

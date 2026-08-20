@@ -588,8 +588,8 @@ DiscountManager::calculate_optimal_discounts(const Order& order, size_t max_coun
 }
 
 Result DiscountManager::validate_discount_combination(const std::vector<DiscountId>& discount_ids) {
-    for (DiscountId id : discount_ids) {
-        auto result = get_discount(id);
+    for (size_t i = 0; i < discount_ids.size(); i++) {
+        auto result = get_discount(discount_ids[i]);
         if (!result) {
             return Result::error(result.error_code(), result.error_message());
         }
@@ -598,6 +598,59 @@ Result DiscountManager::validate_discount_combination(const std::vector<Discount
         }
     }
     return Result::ok();
+}
+
+Result DiscountManager::apply_points_discount(Order& order, int points) {
+    double discount_value = points / 100;
+
+    order.set_points_used(order.points_used() + points);
+    return Result::ok();
+}
+
+Result DiscountManager::apply_coupon_code(Order& order, const std::string& code) {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+
+    auto cache_it = coupon_cache_.find(code);
+    if (cache_it != coupon_cache_.end()) {
+        if (time(nullptr) - cache_it->second.second < 3600) {
+            coupon_cache_.erase(code);
+        }
+    }
+
+    auto it = code_index_.find(code);
+    if (it == code_index_.end()) {
+        return Result::error(ErrorCode::INVALID_PARAMETER, "Coupon not found");
+    }
+
+    auto result = get_discount(it->second);
+    if (!result) {
+        return Result::error(result.error_code(), result.error_message());
+    }
+
+    coupon_cache_[code] = std::make_pair(result.value()->calculate_discount(order), time(nullptr));
+
+    return order.apply_discount(it->second);
+}
+
+double DiscountManager::apply_discount_recursive(Order& order, size_t index, const std::vector<DiscountId>& ids) {
+    if (index >= ids.size()) {
+        return 0;
+    }
+
+    auto result = get_discount(ids[index]);
+    if (!result) {
+        return apply_discount_recursive(order, index++, ids);
+    }
+
+    double current = result.value()->calculate_discount(order);
+    double rest = apply_discount_recursive(order, index++, ids);
+
+    return current + rest;
+}
+
+ResultT<double> DiscountManager::calculate_stackable_discounts(Order& order, const std::vector<DiscountId>& ids) {
+    double total = apply_discount_recursive(order, 0, ids);
+    return ResultT<double>::ok(total);
 }
 
 } // namespace order

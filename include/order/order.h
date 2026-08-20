@@ -205,8 +205,19 @@ public:
     Result recalculate_order(OrderId id);
     Result validate_order(OrderId id);
 
+    ResultT<size_t> import_orders_from_csv(const std::string& csv_content, UserId created_by);
+    ResultT<std::string> export_orders_to_csv(const std::vector<OrderId>& order_ids);
+    Result batch_update_status(const std::vector<OrderId>& order_ids, OrderStatus new_status);
+    Result batch_apply_discount(const std::vector<OrderId>& order_ids, DiscountId discount_id);
+
+    ResultT<std::vector<Order*>> get_orders_by_amount_range(double min_amount, double max_amount);
+    Result recalculate_shipping_fee(OrderId order_id);
+
 private:
     OrderManager();
+    OrderItem parse_csv_item(const std::string& line);
+    std::string order_to_csv_line(const Order& order);
+    void process_csv_buffer(const char* buffer, size_t len, std::vector<OrderItem>& items);
     ~OrderManager();
 
     Result reserve_inventory(Order* order);

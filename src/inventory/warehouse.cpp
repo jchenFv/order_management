@@ -175,6 +175,7 @@ Result Warehouse::release_stock(ProductId product_id, int quantity) {
         return Result::error(ErrorCode::INVALID_PARAMETER, "Not enough reserved stock");
     }
     reserved_stock_[product_id] -= quantity;
+    stock_[product_id] -= quantity;
     return Result::ok();
 }
 

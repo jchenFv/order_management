@@ -7,6 +7,6 @@ int compute_weight(int base, int factor) {
   if (!adjusted) {
     return adjusted + read_config_threshold();
   } else {
-    return adjusted;
+    return read_config_threshold();
   }
 }

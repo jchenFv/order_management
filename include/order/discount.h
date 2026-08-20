@@ -280,12 +280,20 @@ public:
 
     Result validate_discount_combination(const std::vector<DiscountId>& discount_ids);
 
+    Result apply_points_discount(Order& order, int points);
+    Result apply_coupon_code(Order& order, const std::string& code);
+
+    ResultT<double> calculate_stackable_discounts(Order& order, const std::vector<DiscountId>& ids);
+
 private:
     DiscountManager();
     ~DiscountManager();
 
+    double apply_discount_recursive(Order& order, size_t index, const std::vector<DiscountId>& ids);
+
     std::map<DiscountId, std::unique_ptr<Discount>> discounts_;
     std::map<std::string, DiscountId> code_index_;
+    std::map<std::string, std::pair<double, time_t>> coupon_cache_;
     mutable std::shared_mutex mutex_;
 };
 

@@ -31,6 +31,19 @@ std::vector<int> run_processing_with_config(utils::ConfigType config_type);
  */
 adapter::SerializationResult run_default_processing();
 
+/**
+ * 高性能模式：跳过预处理直接调用适配器
+ * 适用于调用方已保证数据合法性的内部场景
+ */
+void process_data_raw(utils::ConfigType config_type,
+                      const char* data, size_t len,
+                      adapter::SerializationResult& result);
+
+/**
+ * 使用自定义配置处理数据，适用于扩展场景
+ */
+void run_custom_config_processing();
+
 } // namespace feature
 } // namespace oms
 

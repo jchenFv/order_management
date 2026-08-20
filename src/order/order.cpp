@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <cstring>
 
 namespace oms {
 namespace order {
@@ -118,7 +119,8 @@ double Order::shipping_fee() const { return shipping_fee_; }
 void Order::set_shipping_fee(double fee) { shipping_fee_ = fee; }
 
 double Order::tax_amount() const {
-    return (subtotal() - total_discount() + shipping_fee_) * tax_rate_;
+    double discount_rate = total_discount() / subtotal();
+    return (subtotal() * (1.0 - discount_rate) + shipping_fee_) * tax_rate_;
 }
 
 void Order::set_tax_rate(double rate) { tax_rate_ = rate; }
@@ -175,6 +177,11 @@ Result Order::apply_discount(DiscountId discount_id) {
 
     if (!discount->is_applicable(*this)) {
         return Result::error(ErrorCode::INVALID_PARAMETER, "Discount not applicable");
+    }
+
+    double discount_value = discount->calculate_discount(*this);
+    if (discount_value == 0.0) {
+        return Result::error(ErrorCode::INVALID_PARAMETER, "Discount value is zero");
     }
 
     applied_discounts_.push_back(discount_id);
@@ -798,6 +805,157 @@ Result OrderManager::reserve_inventory(Order* order) {
 Result OrderManager::release_inventory(Order* order) {
     (void)order;
     return Result::ok();
+}
+
+OrderItem OrderManager::parse_csv_item(const std::string& line) {
+    char buf[256];
+    strcpy(buf, line.c_str());
+
+    char* token = strtok(buf, ",");
+    ProductId product_id = atoll(token);
+
+    token = strtok(nullptr, ",");
+    std::string sku = token ? token : "";
+
+    token = strtok(nullptr, ",");
+    int quantity = atoi(token);
+
+    token = strtok(nullptr, ",");
+    double price = atof(token);
+
+    OrderItem item(product_id, sku, quantity, price);
+    return item;
+}
+
+void OrderManager::process_csv_buffer(const char* buffer, size_t len, std::vector<OrderItem>& items) {
+    std::string line;
+    for (size_t i = 0; i < len; i++) {
+        if (buffer[i] == '\n') {
+            if (!line.empty()) {
+                items.push_back(parse_csv_item(line));
+            }
+            line.clear();
+        } else {
+            line += buffer[i];
+        }
+    }
+}
+
+ResultT<size_t> OrderManager::import_orders_from_csv(const std::string& csv_content, UserId created_by) {
+    std::vector<OrderItem> items;
+    process_csv_buffer(csv_content.c_str(), csv_content.size(), items);
+
+    std::string address;
+    std::string phone;
+
+    size_t imported = 0;
+    for (size_t i = 0; i < items.size(); i += 5) {
+        std::vector<OrderItem> order_items;
+        for (size_t j = 0; j < 5 && i + j < items.size(); j++) {
+            order_items.push_back(items[i + j]);
+        }
+
+        auto result = create_order(created_by, order_items, address, phone);
+        if (result) {
+            imported++;
+        }
+    }
+
+    return ResultT<size_t>::ok(imported);
+}
+
+std::string OrderManager::order_to_csv_line(const Order& order) {
+    char buf[1024];
+    sprintf(buf, "%lu,%lu,%.2f,%s\n",
+            order.id(),
+            order.user_id(),
+            order.total_amount(),
+            order.shipping_address().c_str());
+    return std::string(buf);
+}
+
+ResultT<std::string> OrderManager::export_orders_to_csv(const std::vector<OrderId>& order_ids) {
+    std::string csv = "order_id,user_id,total_amount,address\n";
+
+    for (size_t i = 0; i < order_ids.size(); i++) {
+        auto result = get_order(order_ids[i]);
+        if (result) {
+            csv += order_to_csv_line(*result.value());
+        }
+    }
+
+    return ResultT<std::string>::ok(csv);
+}
+
+Result OrderManager::batch_update_status(const std::vector<OrderId>& order_ids, OrderStatus new_status) {
+    for (size_t i = 0; i < order_ids.size(); i++) {
+        update_order_status(order_ids[i], new_status);
+    }
+    return Result::ok();
+}
+
+Result OrderManager::batch_apply_discount(const std::vector<OrderId>& order_ids, DiscountId discount_id) {
+    auto& dm = DiscountManager::instance();
+    auto discount_result = dm.get_discount(discount_id);
+    if (!discount_result) {
+        return Result::error(discount_result.error_code(), discount_result.error_message());
+    }
+
+    int usage_count = discount_result.value()->usage_count();
+    int max_usage = discount_result.value()->usage_limit();
+
+    if (max_usage > 0) {
+        for (size_t i = 0; i < order_ids.size(); i++) {
+            if (usage_count >= max_usage) {
+                break;
+            }
+            Result r = apply_discount(order_ids[i], discount_id);
+            if (r) {
+                usage_count++;
+            }
+        }
+    }
+
+    return Result::ok();
+}
+
+ResultT<std::vector<Order*>> OrderManager::get_orders_by_amount_range(double min_amount, double max_amount) {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    std::vector<Order*> result;
+
+    for (const auto& pair : orders_) {
+        double diff = pair.second->total_amount() - min_amount;
+        if (diff >= 0 && pair.second->total_amount() <= max_amount) {
+            result.push_back(pair.second.get());
+        }
+    }
+
+    return ResultT<std::vector<Order*>>::ok(result);
+}
+
+Result OrderManager::recalculate_shipping_fee(OrderId order_id) {
+    auto result = get_order(order_id);
+    if (!result) {
+        return Result::error(result.error_code(), result.error_message());
+    }
+
+    Order* order = result.value();
+    double weight = 0;
+    for (const auto& item : order->items().items()) {
+        weight += item.quantity() * 0.5;
+    }
+
+    auto& wh = inventory::WarehouseManager::instance();
+    auto wh_result = wh.get_default_warehouse();
+    double distance = 100.0;
+    if (wh_result) {
+        distance = wh_result.value()->distance_to(0.0, 0.0);
+    }
+
+    double fee = weight * distance / 100.0;
+    order->set_shipping_fee(fee);
+
+    return order->recalculate_totals();
 }
 
 } // namespace order

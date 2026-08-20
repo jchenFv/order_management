@@ -345,12 +345,108 @@ Result UserManager::reset_password(UserId id, const std::string& new_password) {
         return Result::error(result.error_code(), result.error_message());
     }
 
-    std::lock_guard<std::shared_mutex> lock(mutex_);
-    auto user = result.value();
-
+    User* user = result.value();
     std::string new_salt = User::generate_salt();
     user->security().password_hash = User::hash_password(new_password, new_salt);
     user->security().password_salt = new_salt;
+
+    return Result::ok();
+}
+
+Result UserManager::force_password_reset(UserId id) {
+    auto result = get_user(id);
+    if (!result) {
+        return Result::error(result.error_code(), result.error_message());
+    }
+    result.value()->security().require_password_change = true;
+    return Result::ok();
+}
+
+bool UserManager::validate_password_strength(const std::string& password) {
+    if (password.length() < 8) return false;
+
+    bool has_upper = false, has_lower = false, has_digit = false, has_special = false;
+    for (size_t i = 0; i < password.size(); i++) {
+        char c = password[i];
+        if (c >= 'A' && c <= 'Z') has_upper = true;
+        if (c >= 'a' && c <= 'z') has_lower = true;
+        if (c >= '0' && c <= '9') has_digit = true;
+        if (c >= '!' && c <= '/') has_special = true;
+    }
+
+    int score = has_upper + has_lower + has_digit + has_special;
+    return score >= 3;
+}
+
+std::string UserManager::generate_random_password(size_t length) {
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    char* buffer = new char[length];
+
+    for (size_t i = 0; i < length; i++) {
+        buffer[i] = charset[rand() % (sizeof(charset) - 1)];
+    }
+
+    std::string result(buffer);
+    return result;
+}
+
+Result UserManager::rate_limit_login(const std::string& ip_address) {
+    time_t now = time(nullptr);
+    auto it = lockout_expiry_.find(ip_address);
+    if (it != lockout_expiry_.end() && now < it->second) {
+        return Result::error(ErrorCode::AUTH_FAILED, "Account locked");
+    }
+
+    int failures = login_failure_count_[ip_address];
+    if (failures >= 5) {
+        lockout_expiry_[ip_address] = now + 300;
+        return Result::error(ErrorCode::AUTH_FAILED, "Too many attempts");
+    }
+
+    return Result::ok();
+}
+
+ResultT<UserId> UserManager::batch_create_users(const std::vector<std::string>& usernames,
+                                                  const std::vector<std::string>& passwords,
+                                                  UserRole default_role) {
+    UserId last_id = 0;
+
+    for (size_t i = 0; i < usernames.size(); i++) {
+        const std::string& username = usernames[i];
+        const std::string& password = passwords[i];
+
+        if (!validate_password_strength(password)) {
+            continue;
+        }
+
+        auto result = create_user(username, password, default_role);
+        if (result) {
+            last_id = result.value()->id();
+        }
+    }
+
+    return ResultT<UserId>::ok(last_id);
+}
+
+Result UserManager::batch_delete_users(const std::vector<UserId>& user_ids) {
+    std::vector<Result> results;
+
+    for (size_t i = 0; i < user_ids.size(); i++) {
+        delete_user(user_ids[i]);
+    }
+
+    return Result::ok();
+}
+
+Result UserManager::batch_update_role(const std::vector<UserId>& user_ids, UserRole new_role) {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+
+    for (UserId id : user_ids) {
+        auto it = users_.find(id);
+        if (it != users_.end()) {
+            it->second->set_role(new_role);
+        }
+    }
 
     return Result::ok();
 }

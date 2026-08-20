@@ -17,6 +17,7 @@ CACHE_SRCS = $(wildcard $(SRCDIR)/cache/*.cpp)
 AUDIT_SRCS = $(wildcard $(SRCDIR)/audit/*.cpp)
 NOTIFY_SRCS = $(wildcard $(SRCDIR)/notify/*.cpp)
 PROCESS_SRCS = $(wildcard $(SRCDIR)/process/*.cpp)
+BUSINESS_SRCS = $(wildcard $(SRCDIR)/business/*.cpp)
 UTILS_SRCS = $(wildcard $(SRCDIR)/utils/*.cpp)
 ADAPTER_SRCS = $(wildcard $(SRCDIR)/adapter/*.cpp)
 FEATURE_SRCS = $(wildcard $(SRCDIR)/feature/*.cpp)
@@ -24,7 +25,7 @@ MAIN_SRC = $(SRCDIR)/main.cpp
 
 ALL_SRCS = $(COMMON_SRCS) $(AUTH_SRCS) $(ORDER_SRCS) $(INVENTORY_SRCS) \
            $(PAYMENT_SRCS) $(DB_SRCS) $(CACHE_SRCS) $(AUDIT_SRCS) $(NOTIFY_SRCS) \
-           $(MAIN_SRC) $(PROCESS_SRCS) $(UTILS_SRCS) $(ADAPTER_SRCS) $(FEATURE_SRCS)
+           $(MAIN_SRC) $(PROCESS_SRCS) $(BUSINESS_SRCS) $(UTILS_SRCS) $(ADAPTER_SRCS) $(FEATURE_SRCS)
 
 OBJS = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(ALL_SRCS))
 

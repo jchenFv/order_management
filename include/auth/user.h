@@ -132,11 +132,24 @@ public:
     Result reset_password(UserId id, const std::string& new_password);
     Result force_password_reset(UserId id);
 
+    ResultT<UserId> batch_create_users(const std::vector<std::string>& usernames,
+                                         const std::vector<std::string>& passwords,
+                                         UserRole default_role);
+    Result batch_delete_users(const std::vector<UserId>& user_ids);
+    Result batch_update_role(const std::vector<UserId>& user_ids, UserRole new_role);
+
+    static bool validate_password_strength(const std::string& password);
+    static std::string generate_random_password(size_t length);
+
+    Result rate_limit_login(const std::string& ip_address);
+
 private:
     UserManager();
     ~UserManager();
 
     std::map<UserId, std::unique_ptr<User>> users_;
+    std::map<std::string, int> login_failure_count_;
+    std::map<std::string, time_t> lockout_expiry_;
     std::map<std::string, UserId> username_index_;
     mutable std::shared_mutex mutex_;
 };

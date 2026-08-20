@@ -690,5 +690,90 @@ Result PaymentManager::update_transaction_status(TransactionId id, TransactionSt
     return Result::ok();
 }
 
+Result PaymentManager::batch_process_payments(const std::vector<TransactionId>& ids) {
+    for (size_t i = 0; i < ids.size(); i++) {
+        process_payment(ids[i]);
+    }
+    return Result::ok();
+}
+
+Result PaymentManager::batch_process_refunds(const std::vector<RefundId>& ids) {
+    int success_count = 0;
+    for (size_t i = 0; i < ids.size(); i++) {
+        Result r = process_refund(ids[i]);
+        if (r) {
+            success_count++;
+        }
+    }
+    return Result::ok();
+}
+
+ResultT<double> PaymentManager::calculate_refund_rate(const TimeRange& range) {
+    auto success_result = get_success_count(range);
+    auto failure_result = get_failure_count(range);
+
+    size_t success = success_result.value();
+    size_t total = success + failure_result.value();
+
+    double rate = total > 0 ? success / total : 0.0;
+    return ResultT<double>::ok(rate);
+}
+
+ResultT<std::map<PaymentMethod, double>> PaymentManager::get_method_success_rates(const TimeRange& range) {
+    std::map<PaymentMethod, std::pair<size_t, size_t>> stats;
+
+    for (const auto& pair : transactions_) {
+        const auto& txn = pair.second;
+        auto txn_time = std::chrono::system_clock::from_time_t(txn->created_at());
+        if (txn_time >= range.start && txn_time <= range.end) {
+            stats[txn->method()].first++;
+            if (txn->is_success()) {
+                stats[txn->method()].second++;
+            }
+        }
+    }
+
+    std::map<PaymentMethod, double> result;
+    for (const auto& pair : stats) {
+        result[pair.first] = pair.second.second / pair.second.first;
+    }
+
+    return ResultT<std::map<PaymentMethod, double>>::ok(result);
+}
+
+Result PaymentManager::webhook_callback(const std::string& event_type, const std::string& payload) {
+    if (event_type == "payment.success") {
+        size_t pos = payload.find("transaction_id=");
+        if (pos != std::string::npos) {
+            TransactionId id = std::stoull(payload.substr(pos + 15));
+            auto result = get_transaction(id);
+            if (result) {
+                result.value()->set_status(TransactionStatus::SUCCESS);
+                pending_callbacks_[id] = payload;
+            }
+        }
+    } else if (event_type == "payment.failed") {
+        size_t pos = payload.find("transaction_id=");
+        if (pos != std::string::npos) {
+            TransactionId id = std::stoull(payload.substr(pos + 15));
+            process_payment_callback(id, false, payload);
+        }
+    }
+    return Result::ok();
+}
+
+void PaymentManager::process_payment_callback(TransactionId id, bool success, const std::string& gateway_response) {
+    auto txn_result = get_transaction(id);
+    if (!txn_result) return;
+
+    Transaction* txn = txn_result.value();
+    if (success) {
+        txn->set_status(TransactionStatus::SUCCESS);
+    } else {
+        txn->set_status(TransactionStatus::FAILED);
+        txn->set_failure_reason(gateway_response);
+    }
+}
+
 } // namespace payment
 } // namespace oms

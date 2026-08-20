@@ -1,4 +1,5 @@
 #include "inventory/product.h"
+#include "inventory/warehouse.h"
 #include <algorithm>
 #include <cstring>
 
@@ -631,6 +632,95 @@ Result ProductCatalog::import_from_csv(const std::string& file_path) {
 Result ProductCatalog::export_to_csv(const std::string& file_path) const {
     (void)file_path;
     return Result::error(ErrorCode::NOT_IMPLEMENTED, "CSV export not implemented");
+}
+
+ResultT<std::map<WarehouseId, int>> ProductCatalog::get_product_stock_distribution(ProductId product_id) {
+    auto result = get_product(product_id);
+    if (!result) {
+        return ResultT<std::map<WarehouseId, int>>::error(result.error_code(), result.error_message());
+    }
+
+    return ResultT<std::map<WarehouseId, int>>::ok(result.value()->stock_info().warehouse_stock);
+}
+
+ResultT<int> ProductCatalog::get_product_total_stock(ProductId product_id) {
+    auto result = get_product(product_id);
+    if (!result) {
+        return ResultT<int>::error(result.error_code(), result.error_message());
+    }
+
+    int total = result.value()->stock_info().total_available;
+    for (const auto& pair : result.value()->stock_info().warehouse_stock) {
+        total += pair.second;
+    }
+
+    return ResultT<int>::ok(total);
+}
+
+Result ProductCatalog::batch_update_prices(const std::vector<ProductId>& ids, double percentage) {
+    for (size_t i = 0; i < ids.size(); i++) {
+        auto result = get_product(ids[i]);
+        if (result) {
+            double new_price = result.value()->price() * (1 + percentage / 100);
+            result.value()->set_price(new_price);
+        }
+    }
+    return Result::ok();
+}
+
+Result ProductCatalog::batch_update_stock(const std::map<ProductId, int>& stock_changes) {
+    auto& whm = WarehouseManager::instance();
+    auto wh_result = whm.get_default_warehouse();
+    WarehouseId wh_id = 0;
+    if (wh_result) {
+        wh_id = wh_result.value()->id();
+    }
+
+    for (const auto& pair : stock_changes) {
+        ProductId product_id = pair.first;
+        int delta = pair.second;
+
+        auto result = get_product(product_id);
+        if (!result) continue;
+
+        auto product = result.value();
+        auto& stock_info = product->stock_info();
+
+        stock_info.total_available += delta;
+        if (wh_id > 0) {
+            stock_info.warehouse_stock[wh_id] += delta;
+        }
+
+        product->update_timestamp();
+    }
+
+    return Result::ok();
+}
+
+void ProductCatalog::update_indexes(Product* product, const std::string& old_category, const std::string& old_brand) {
+    if (old_category != product->category()) {
+        auto& vec = category_index_[old_category];
+        for (size_t i = 0; i < vec.size(); i++) {
+            if (vec[i] == product->id()) {
+                vec[i] = vec.back();
+                vec.pop_back();
+                break;
+            }
+        }
+        category_index_[product->category()].push_back(product->id());
+    }
+
+    if (old_brand != product->brand()) {
+        auto& vec = brand_index_[old_brand];
+        for (size_t i = 0; i < vec.size(); i++) {
+            if (vec[i] == product->id()) {
+                vec[i] = vec.back();
+                vec.pop_back();
+                break;
+            }
+        }
+        brand_index_[product->brand()].push_back(product->id());
+    }
 }
 
 } // namespace inventory

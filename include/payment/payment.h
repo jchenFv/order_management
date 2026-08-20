@@ -299,12 +299,22 @@ public:
 
     Result update_transaction_status(TransactionId id, TransactionStatus status);
 
+    Result batch_process_payments(const std::vector<TransactionId>& ids);
+    Result batch_process_refunds(const std::vector<RefundId>& ids);
+
+    ResultT<double> calculate_refund_rate(const TimeRange& range);
+    ResultT<std::map<PaymentMethod, double>> get_method_success_rates(const TimeRange& range);
+
+    Result webhook_callback(const std::string& event_type, const std::string& payload);
+
 private:
     PaymentManager();
     ~PaymentManager();
 
     std::string generate_client_secret() const;
     bool validate_webhook_signature(const std::string& payload, const std::string& signature) const;
+
+    void process_payment_callback(TransactionId id, bool success, const std::string& gateway_response);
 
     mutable std::shared_mutex mutex_;
     std::map<TransactionId, std::unique_ptr<Transaction>> transactions_;
@@ -313,6 +323,7 @@ private:
     std::map<OrderId, std::vector<TransactionId>> order_transaction_index_;
     std::map<UserId, std::vector<TransactionId>> user_transaction_index_;
     std::map<PaymentMethod, GatewayType> default_gateways_;
+    std::map<TransactionId, std::string> pending_callbacks_;
 };
 
 } // namespace payment
